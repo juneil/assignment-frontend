@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+    WebAppBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+            BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                    - ServerSideEncryptionByDefault:
+                          SSEAlgorithm: AES256
+            PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                BlockPublicPolicy: true
+                IgnorePublicAcls: true
+                RestrictPublicBuckets: true
+            WebsiteConfiguration:
+                IndexDocument: index.html
+
+    WebAppBucketBucketPolicy:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            Bucket: !Ref WebAppBucket
+            PolicyDocument:
+                Statement:
+                    - Action:
+                          - s3:GetObject
+                      Effect: Allow
+                      Resource: !Sub 'arn:aws:s3:::${WebAppBucket}/*'
+                      Principal:
+                          CanonicalUser: !GetAtt OriginAccessIdentity.S3CanonicalUserId
+                    - Sid: AllowSSLRequestsOnly
+                      Action: s3:*
+                      Effect: Deny
+                      Resource:
+                          - !Sub 'arn:${AWS::Partition}:s3:::${WebAppBucket}'
+                          - !Sub 'arn:${AWS::Partition}:s3:::${WebAppBucket}/*'
+                      Condition:
+                          Bool:
+                              aws:SecureTransport: 'false'
+                      Principal: '*'
+
+    OriginAccessIdentity:
+        Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+        Properties:
+            CloudFrontOriginAccessIdentityConfig:
+                Comment: 'Assignment WebApp'
+
+    ContentDelivery:
+        Type: AWS::CloudFront::Distribution
+        Properties:
+            DistributionConfig:
+                HttpVersion: http2
+                CustomErrorResponses:
+                    - ErrorCode: 403
+                      ResponsePagePath: '/index.html'
+                      ResponseCode: 200
+                      ErrorCachingMinTTL: 300
+                    - ErrorCode: 404
+                      ResponsePagePath: '/index.html'
+                      ResponseCode: 200
+                      ErrorCachingMinTTL: 300
+                DefaultCacheBehavior:
+                    AllowedMethods:
+                        - GET
+                        - HEAD
+                        - OPTIONS
+                    CachedMethods:
+                        - GET
+                        - HEAD
+                        - OPTIONS
+                    Compress: true
+                    ForwardedValues:
+                        QueryString: true
+                    TargetOriginId: S3
+                    SmoothStreaming: false
+                    ViewerProtocolPolicy: redirect-to-https
+                DefaultRootObject: 'index.html'
+                Enabled: true
+                Origins:
+                    - Id: S3
+                      DomainName: !GetAtt WebAppBucket.RegionalDomainName
+                      S3OriginConfig:
+                          OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${OriginAccessIdentity}'
+                PriceClass: PriceClass_100
+
+Outputs:
+    Bucket:
+        Description: WebApp Bucket
+        Value: !Ref WebAppBucket
+
+    Distribution:
+        Description: Content Delivery distribution ID
+        Value: !Ref ContentDelivery
